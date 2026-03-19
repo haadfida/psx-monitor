@@ -176,7 +176,7 @@ function MacroFactorsPanel() {
   );
 }
 
-function NewsFeedPanel({ selectedStock }) {
+function NewsFeedPanel({ selectedStock, user }) {
   const [newsFilter, setNewsFilter] = useState("all");
   const [liveNews, setLiveNews] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -186,16 +186,16 @@ function NewsFeedPanel({ selectedStock }) {
 
   const tickers = Object.keys(WATCHLIST_STOCKS);
 
-  // Fetch live news on mount
+  // Fetch live news on mount — ONLY if logged in
   useEffect(() => {
-    if (!status.hasApiKey) return;
+    if (!status.hasApiKey || !user) return;
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const result = await getNewsAnalysis(tickers, false);
+        const result = await getNewsAnalysis(tickers);
         if (!cancelled) {
           setLiveNews(result);
           setCacheInfo({
@@ -212,7 +212,7 @@ function NewsFeedPanel({ selectedStock }) {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
 
   // Determine which articles to show
   const articles = liveNews?.articles || [];
@@ -1458,14 +1458,20 @@ export default function App() {
     init();
   }, []);
 
-  // Save positions to Supabase whenever they change
+  // Save positions to Supabase — debounced to avoid rapid fire
+  const positionsLoaded = useRef(false);
   useEffect(() => {
     if (!user || positions.length === 0) return;
-    const save = async () => {
+    // Skip the first render (positions loaded from Supabase, no need to save back)
+    if (!positionsLoaded.current) {
+      positionsLoaded.current = true;
+      return;
+    }
+    const timeout = setTimeout(async () => {
       const { savePositions } = await import("./supabase.js");
       await savePositions(positions);
-    };
-    save();
+    }, 2000); // wait 2s after last change
+    return () => clearTimeout(timeout);
   }, [positions, user]);
 
   const handleAuth = async () => {
@@ -1666,7 +1672,7 @@ export default function App() {
               ))}
             </div>
             {activePanel === "news" ? (
-              <NewsFeedPanel selectedStock={selectedStock} />
+              <NewsFeedPanel selectedStock={selectedStock} user={user} />
             ) : (
               <MacroFactorsPanel />
             )}

@@ -99,9 +99,10 @@ export async function savePositions(positions) {
     broker_fees: p.brokerFees || 0,
   }));
 
-  // Delete all existing, then insert fresh (simpler than upsert with composite keys)
-  await supabase.from("positions").delete().eq("user_id", user.id);
-  const { error } = await supabase.from("positions").insert(rows);
+  // Upsert to avoid 409 conflicts from race conditions
+  const { error } = await supabase
+    .from("positions")
+    .upsert(rows, { onConflict: "user_id,ticker" });
   if (error) console.error("Save positions failed:", error);
   return { success: !error, error };
 }
