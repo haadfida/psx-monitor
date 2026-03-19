@@ -1,19 +1,22 @@
 // News Intelligence Module
+// Calls /api/claude serverless proxy (API key stays server-side)
 // Cache: Supabase only. No localStorage.
-// Calls Claude API once per 24h, result shared across all devices.
 
 import { getNewsCache, saveNewsCache } from "./supabase.js";
 
-const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
+// We assume the proxy is available if we're deployed on Vercel
+// For local dev, set VITE_ANTHROPIC_API_KEY in .env
+const HAS_API = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD);
 
-export function isLiveNewsEnabled() { return !!ANTHROPIC_API_KEY; }
+export function isLiveNewsEnabled() { return HAS_API; }
+export function getNewsStatus() { return { hasApiKey: HAS_API }; }
 
 /**
  * Get news analysis — Supabase cache first, Claude API if stale
  */
 export async function getNewsAnalysis(tickers) {
-  if (!ANTHROPIC_API_KEY) {
-    return { articles: FALLBACK_NEWS, overallSentiment: "mixed", marketSummary: "Static fallback — add API key for live analysis.", topAction: null, isLive: false, fromCache: false };
+  if (!HAS_API) {
+    return { articles: [], overallSentiment: null, marketSummary: null, topAction: null, isLive: false, fromCache: false, noApiKey: true };
   }
 
   // Check Supabase cache
@@ -39,14 +42,14 @@ export async function getNewsAnalysis(tickers) {
   }
 
   // Nothing works — fallback
-  return { articles: FALLBACK_NEWS, overallSentiment: "mixed", marketSummary: "Could not fetch live analysis.", topAction: null, isLive: false, fromCache: false };
+  return { articles: [], overallSentiment: null, marketSummary: "Could not fetch live analysis. Will retry automatically.", topAction: null, isLive: false, fromCache: false };
 }
 
 async function fetchFromClaude(tickers) {
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("/api/claude", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 2000,
@@ -129,5 +132,3 @@ export function getNewsSentimentSummary(articles = null) {
   const negative = news.filter(n => n.sentiment === "negative").length;
   return { total, positive, negative, neutral: total - positive - negative, ratio: ((positive - negative) / total * 100).toFixed(0) };
 }
-
-export function getNewsStatus() { return { hasApiKey: !!ANTHROPIC_API_KEY }; }

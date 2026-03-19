@@ -102,13 +102,13 @@ export function generateSellSignals(position, stock, portfolioValue) {
 
 import { getAdviceCache, saveAdviceCache } from "./supabase.js";
 
-const ANTHROPIC_API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
+const HAS_API = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD);
 
 /**
  * Get monthly advice — Supabase cache first, Claude API if >30 days
  */
 export async function getMonthlyAdvice(positions, budget = 50000) {
-  if (!ANTHROPIC_API_KEY) {
+  if (!HAS_API) {
     return { summary: "Add your Anthropic API key for personalized allocation advice.", allocations: [], rotations: [], _noKey: true };
   }
 
@@ -147,13 +147,9 @@ async function fetchMonthlyAdviceFromAPI(positions, budget) {
   }, 0);
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("/api/claude", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1500,

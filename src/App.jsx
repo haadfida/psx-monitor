@@ -15,7 +15,7 @@ import {
   WATCHLIST_STOCKS, KSE100_DATA, SECTOR_DATA, MACRO_FACTORS, computeScore,
 } from "./data.js";
 import {
-  FALLBACK_NEWS, getNewsForStock, getLatestNews, getNewsSentimentSummary,
+  getNewsForStock, getLatestNews, getNewsSentimentSummary,
   getNewsAnalysis, getNewsStatus,
 } from "./news.js";
 import {
@@ -215,11 +215,11 @@ function NewsFeedPanel({ selectedStock }) {
   }, []);
 
   // Determine which articles to show
-  const articles = liveNews?.articles || FALLBACK_NEWS;
+  const articles = liveNews?.articles || [];
   const news = newsFilter === "stock"
     ? articles.filter(n => n.affectedTickers?.includes(selectedStock))
     : articles.slice(0, 10);
-  const sentiment = getNewsSentimentSummary(articles);
+  const sentiment = articles.length > 0 ? getNewsSentimentSummary(articles) : null;
 
   return (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
@@ -289,31 +289,33 @@ function NewsFeedPanel({ selectedStock }) {
         ))}
       </div>
 
-      {/* Sentiment bar */}
-      <div style={{
-        display: "flex", gap: 12, marginBottom: 10, padding: "6px 10px",
-        background: C.bg, borderRadius: 8, border: `1px solid ${C.border}`,
-      }}>
-        <div style={{ fontSize: 10, color: C.textDim }}>
-          Sentiment:
-          <span style={{
-            marginLeft: 6, fontWeight: 700,
-            color: parseInt(sentiment.ratio) > 0 ? C.green : parseInt(sentiment.ratio) < 0 ? C.red : C.amber,
-          }}>
-            {parseInt(sentiment.ratio) > 0 ? "+" : ""}{sentiment.ratio}%
-          </span>
+      {/* Sentiment bar — only show if we have data */}
+      {sentiment && (
+        <div style={{
+          display: "flex", gap: 12, marginBottom: 10, padding: "6px 10px",
+          background: C.bg, borderRadius: 8, border: `1px solid ${C.border}`,
+        }}>
+          <div style={{ fontSize: 10, color: C.textDim }}>
+            Sentiment:
+            <span style={{
+              marginLeft: 6, fontWeight: 700,
+              color: parseInt(sentiment.ratio) > 0 ? C.green : parseInt(sentiment.ratio) < 0 ? C.red : C.amber,
+            }}>
+              {parseInt(sentiment.ratio) > 0 ? "+" : ""}{sentiment.ratio}%
+            </span>
+          </div>
+          <div style={{ flex: 1, display: "flex", gap: 2, alignItems: "center" }}>
+            <div style={{ height: 6, flex: sentiment.positive || 1, background: C.green, borderRadius: "3px 0 0 3px" }} />
+            <div style={{ height: 6, flex: sentiment.neutral || 1, background: C.textDim }} />
+            <div style={{ height: 6, flex: sentiment.negative || 1, background: C.red, borderRadius: "0 3px 3px 0" }} />
+          </div>
+          <div style={{ display: "flex", gap: 8, fontSize: 9, color: C.textDim }}>
+            <span style={{ color: C.green }}>+{sentiment.positive}</span>
+            <span>{sentiment.neutral}</span>
+            <span style={{ color: C.red }}>-{sentiment.negative}</span>
+          </div>
         </div>
-        <div style={{ flex: 1, display: "flex", gap: 2, alignItems: "center" }}>
-          <div style={{ height: 6, flex: sentiment.positive || 1, background: C.green, borderRadius: "3px 0 0 3px" }} />
-          <div style={{ height: 6, flex: sentiment.neutral || 1, background: C.textDim }} />
-          <div style={{ height: 6, flex: sentiment.negative || 1, background: C.red, borderRadius: "0 3px 3px 0" }} />
-        </div>
-        <div style={{ display: "flex", gap: 8, fontSize: 9, color: C.textDim }}>
-          <span style={{ color: C.green }}>+{sentiment.positive}</span>
-          <span>{sentiment.neutral}</span>
-          <span style={{ color: C.red }}>-{sentiment.negative}</span>
-        </div>
-      </div>
+      )}
 
       {/* Loading state */}
       {loading && !liveNews && (
@@ -384,9 +386,21 @@ function NewsFeedPanel({ selectedStock }) {
               </div>
             );
           })}
-          {news.length === 0 && (
-            <div style={{ padding: 20, textAlign: "center", color: C.textDim, fontSize: 12 }}>
-              {newsFilter === "stock" ? `No news affecting ${selectedStock}` : "No news available"}
+          {news.length === 0 && !loading && (
+            <div style={{ padding: 24, textAlign: "center" }}>
+              <Newspaper size={24} color={C.textDim} style={{ marginBottom: 8, opacity: 0.5 }} />
+              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 4 }}>
+                {!liveNews?.isLive
+                  ? "News analysis not yet available"
+                  : newsFilter === "stock"
+                    ? `No recent news affecting ${selectedStock}`
+                    : "No news articles found"}
+              </div>
+              <div style={{ fontSize: 10, color: C.textDim }}>
+                {!liveNews?.isLive
+                  ? "Sign in and ensure your API key is configured to enable live analysis."
+                  : "Check back later — analysis refreshes every 24 hours."}
+              </div>
             </div>
           )}
         </div>
