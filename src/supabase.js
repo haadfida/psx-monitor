@@ -1,25 +1,32 @@
-// Supabase Client & Database Module
-// Handles auth, position storage, and transaction history
+// Supabase Client — single source of truth for all data
+// No localStorage fallback. Supabase or nothing.
 
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
-export const supabase = supabaseUrl
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn("PSX Monitor: Supabase not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to .env");
+}
+
+export const supabase = supabaseUrl && supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
 // ============================================================
-// AUTH
+// AUTH — email/password (simple, no Google OAuth needed)
 // ============================================================
 
-export async function signInWithGoogle() {
+export async function signUp(email, password) {
   if (!supabase) return { error: "Supabase not configured" };
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.origin },
-  });
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  return { data, error };
+}
+
+export async function signIn(email, password) {
+  if (!supabase) return { error: "Supabase not configured" };
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   return { data, error };
 }
 
@@ -34,6 +41,12 @@ export async function getUser() {
   return user;
 }
 
+export async function getSession() {
+  if (!supabase) return null;
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+}
+
 export function onAuthStateChange(callback) {
   if (!supabase) return { data: { subscription: { unsubscribe: () => {} } } };
   return supabase.auth.onAuthStateChange((_event, session) => {
@@ -42,39 +55,36 @@ export function onAuthStateChange(callback) {
 }
 
 // ============================================================
-// POSITIONS CRUD
+// POSITIONS
 // ============================================================
 
 export async function loadPositions() {
-  if (!supabase) {
-    // Fallback to localStorage
-    try {
-      return JSON.parse(localStorage.getItem("psx_positions") || "[]");
-    } catch { return []; }
-  }
-
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from("positions")
     .select("*")
     .order("ticker");
-
-  if (error) {
-    console.error("Failed to load positions:", error);
-    return [];
-  }
-  return data;
+  if (error) { console.error("Load positions failed:", error); return []; }
+  // Map DB columns to app format
+  return (data || []).map(row => ({
+    ticker: row.ticker,
+    shares: parseFloat(row.shares),
+    avgCost: parseFloat(row.avg_cost),
+    totalInvested: parseFloat(row.total_invested || 0),
+    targetSell: row.target_sell ? parseFloat(row.target_sell) : null,
+    stopLoss: row.stop_loss ? parseFloat(row.stop_loss) : null,
+    highSinceBuy: row.high_since_buy ? parseFloat(row.high_since_buy) : null,
+    notes: row.notes || "",
+    buyDate: row.buy_date,
+    brokerFees: parseFloat(row.broker_fees || 0),
+  }));
 }
 
 export async function savePositions(positions) {
-  if (!supabase) {
-    localStorage.setItem("psx_positions", JSON.stringify(positions));
-    return { success: true };
-  }
-
+  if (!supabase) return { error: "Supabase not configured" };
   const user = await getUser();
-  if (!user) return { error: "Not authenticated" };
+  if (!user) return { error: "Not logged in" };
 
-  // Upsert all positions (insert or update by user_id + ticker)
   const rows = positions.map(p => ({
     user_id: user.id,
     ticker: p.ticker,
@@ -89,49 +99,33 @@ export async function savePositions(positions) {
     broker_fees: p.brokerFees || 0,
   }));
 
-  const { error } = await supabase
-    .from("positions")
-    .upsert(rows, { onConflict: "user_id,ticker" });
-
-  if (error) console.error("Failed to save positions:", error);
+  // Delete all existing, then insert fresh (simpler than upsert with composite keys)
+  await supabase.from("positions").delete().eq("user_id", user.id);
+  const { error } = await supabase.from("positions").insert(rows);
+  if (error) console.error("Save positions failed:", error);
   return { success: !error, error };
 }
 
 export async function deletePosition(ticker) {
-  if (!supabase) {
-    const current = JSON.parse(localStorage.getItem("psx_positions") || "[]");
-    localStorage.setItem("psx_positions", JSON.stringify(current.filter(p => p.ticker !== ticker)));
-    return { success: true };
-  }
-
+  if (!supabase) return { error: "Supabase not configured" };
   const user = await getUser();
-  if (!user) return { error: "Not authenticated" };
-
+  if (!user) return { error: "Not logged in" };
   const { error } = await supabase
     .from("positions")
     .delete()
     .eq("user_id", user.id)
     .eq("ticker", ticker);
-
   return { success: !error, error };
 }
 
 // ============================================================
-// TRANSACTIONS (trade history from Finqalab imports)
+// TRANSACTIONS
 // ============================================================
 
 export async function saveTransactions(trades) {
-  if (!supabase) {
-    const existing = JSON.parse(localStorage.getItem("psx_transactions") || "[]");
-    // Dedupe by tradeNo
-    const existingIds = new Set(existing.map(t => t.tradeNo));
-    const newTrades = trades.filter(t => !existingIds.has(t.tradeNo));
-    localStorage.setItem("psx_transactions", JSON.stringify([...existing, ...newTrades]));
-    return { added: newTrades.length };
-  }
-
+  if (!supabase) return { error: "Supabase not configured" };
   const user = await getUser();
-  if (!user) return { error: "Not authenticated" };
+  if (!user) return { error: "Not logged in" };
 
   const rows = trades.map(t => ({
     user_id: user.id,
@@ -148,46 +142,85 @@ export async function saveTransactions(trades) {
     cvt: t.cvt,
   }));
 
-  // Use trade_no as unique constraint to avoid duplicates on re-import
   const { data, error } = await supabase
     .from("transactions")
     .upsert(rows, { onConflict: "user_id,trade_no" });
-
-  if (error) console.error("Failed to save transactions:", error);
+  if (error) console.error("Save transactions failed:", error);
   return { success: !error, error };
 }
 
-export async function loadTransactions() {
-  if (!supabase) {
-    try {
-      return JSON.parse(localStorage.getItem("psx_transactions") || "[]");
-    } catch { return []; }
-  }
+// ============================================================
+// NEWS CACHE
+// ============================================================
 
-  const { data, error } = await supabase
-    .from("transactions")
+export async function getNewsCache() {
+  if (!supabase) return null;
+  const user = await getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("news_cache")
     .select("*")
-    .order("trade_date", { ascending: false });
+    .eq("user_id", user.id)
+    .order("fetched_at", { ascending: false })
+    .limit(1)
+    .single();
 
-  if (error) {
-    console.error("Failed to load transactions:", error);
-    return [];
-  }
-  return data;
+  if (!data) return null;
+  const ageHours = (Date.now() - new Date(data.fetched_at).getTime()) / 3600000;
+  return { analysis: data.analysis, fetchedAt: data.fetched_at, ageHours, isStale: ageHours > 24 };
+}
+
+export async function saveNewsCache(analysis, tickers) {
+  if (!supabase) return;
+  const user = await getUser();
+  if (!user) return;
+
+  await supabase.from("news_cache").delete().eq("user_id", user.id);
+  await supabase.from("news_cache").insert({
+    user_id: user.id, analysis, tickers, fetched_at: new Date().toISOString(),
+  });
 }
 
 // ============================================================
-// IMPORT LOG (track when PDFs were imported)
+// ADVICE CACHE
+// ============================================================
+
+export async function getAdviceCache() {
+  if (!supabase) return null;
+  const user = await getUser();
+  if (!user) return null;
+
+  const { data } = await supabase
+    .from("advice_cache")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("fetched_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (!data) return null;
+  const ageDays = (Date.now() - new Date(data.fetched_at).getTime()) / 86400000;
+  return { advice: data.advice, fetchedAt: data.fetched_at, ageDays, isStale: ageDays > 30 };
+}
+
+export async function saveAdviceCache(advice) {
+  if (!supabase) return;
+  const user = await getUser();
+  if (!user) return;
+
+  await supabase.from("advice_cache").delete().eq("user_id", user.id);
+  await supabase.from("advice_cache").insert({
+    user_id: user.id, advice, fetched_at: new Date().toISOString(),
+  });
+}
+
+// ============================================================
+// IMPORT LOG
 // ============================================================
 
 export async function saveImportLog(meta, tradeCount, positionCount) {
-  if (!supabase) {
-    const logs = JSON.parse(localStorage.getItem("psx_import_logs") || "[]");
-    logs.push({ ...meta, tradeCount, positionCount, importedAt: new Date().toISOString() });
-    localStorage.setItem("psx_import_logs", JSON.stringify(logs));
-    return;
-  }
-
+  if (!supabase) return;
   const user = await getUser();
   if (!user) return;
 
