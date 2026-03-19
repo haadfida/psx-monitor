@@ -159,15 +159,15 @@ export async function getNewsCache() {
   const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("news_cache")
     .select("*")
     .eq("user_id", user.id)
     .order("fetched_at", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (!data) return null;
+  if (error || !data) return null;
   const ageHours = (Date.now() - new Date(data.fetched_at).getTime()) / 3600000;
   return { analysis: data.analysis, fetchedAt: data.fetched_at, ageHours, isStale: ageHours > 24 };
 }
@@ -192,15 +192,15 @@ export async function getAdviceCache() {
   const user = await getUser();
   if (!user) return null;
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("advice_cache")
     .select("*")
     .eq("user_id", user.id)
     .order("fetched_at", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (!data) return null;
+  if (error || !data) return null;
   const ageDays = (Date.now() - new Date(data.fetched_at).getTime()) / 86400000;
   return { advice: data.advice, fetchedAt: data.fetched_at, ageDays, isStale: ageDays > 30 };
 }
