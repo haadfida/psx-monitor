@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
@@ -8,7 +8,8 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, DollarSign, BarChart3,
   Activity, ArrowUpRight, ArrowDownRight, Clock, Zap, Shield, Target,
   Newspaper, Globe, ChevronRight, ExternalLink, AlertCircle, CheckCircle,
-  XCircle, Minus, Filter, Lock, Briefcase, Plus, Edit2, Trash2,
+  XCircle, Minus, Filter, Lock, Briefcase, Plus, Edit2, Trash2, Upload,
+  FileText, Check,
 } from "lucide-react";
 import {
   WATCHLIST_STOCKS, KSE100_DATA, SECTOR_DATA, MACRO_FACTORS, computeScore,
@@ -20,6 +21,7 @@ import {
   generateSellSignals, calculatePositionPnL, calculatePortfolioSummary,
   SIGNAL_TYPES, SAMPLE_PORTFOLIO,
 } from "./portfolio.js";
+import { parseFinqalabText } from "./finqalab-parser.js";
 
 const C = {
   bg: "#0a0f1a", card: "#111827", cardHover: "#1a2236",
@@ -718,6 +720,11 @@ function AddPositionModal({ onAdd, onClose, editPosition }) {
 function PortfolioPanel({ positions, setPositions, onStockSelect }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPosition, setEditingPosition] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importData, setImportData] = useState(null);
+  const [importError, setImportError] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   const summary = useMemo(() => calculatePortfolioSummary(positions), [positions]);
 
@@ -729,6 +736,76 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
       return generateSellSignals(pos, stock, summary.totalValue || 1).map(s => ({ ...s, ticker: pos.ticker }));
     }).sort((a, b) => SIGNAL_TYPES[a.type].priority - SIGNAL_TYPES[b.type].priority);
   }, [positions, summary.totalValue]);
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportError(null);
+
+    try {
+      // Read PDF as text using pdf.js
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+          script.onload = () => {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+              "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+            resolve();
+          };
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      let fullText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        // Reconstruct lines by grouping items with similar Y positions
+        const items = content.items.filter(item => item.str.trim());
+        let lines = [];
+        let currentLine = "";
+        let lastY = null;
+        for (const item of items) {
+          if (lastY !== null && Math.abs(item.transform[5] - lastY) > 3) {
+            if (currentLine.trim()) lines.push(currentLine.trim());
+            currentLine = "";
+          }
+          currentLine += item.str + " ";
+          lastY = item.transform[5];
+        }
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        fullText += lines.join("\n") + "\n";
+      }
+
+      const result = parseFinqalabText(fullText);
+
+      if (result.positions.length === 0) {
+        setImportError("No positions found in PDF. Make sure it's a Finqalab Periodic Trade Details Report.");
+      } else {
+        setImportData(result);
+        setShowImportModal(true);
+      }
+    } catch (err) {
+      console.error("PDF parse error:", err);
+      setImportError("Failed to parse PDF: " + err.message);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleConfirmImport = () => {
+    if (!importData) return;
+    setPositions(importData.positions);
+    setShowImportModal(false);
+    setImportData(null);
+  };
 
   const handleAdd = (position) => {
     if (editingPosition) {
@@ -835,21 +912,56 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>Your Positions</div>
-          <button onClick={() => { setEditingPosition(null); setShowAddModal(true); }} style={{
-            padding: "5px 12px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`,
-            border: "none", borderRadius: 6, color: C.bg, fontSize: 10, fontWeight: 700, cursor: "pointer",
-          }}>+ Add Position</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input type="file" ref={fileInputRef} accept=".pdf" onChange={handleFileSelect}
+              style={{ display: "none" }} />
+            <button onClick={() => fileInputRef.current?.click()} disabled={importing} style={{
+              padding: "5px 12px", background: "transparent", border: `1px solid ${C.accent}`,
+              borderRadius: 6, color: C.accent, fontSize: 10, fontWeight: 700, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 4, opacity: importing ? 0.5 : 1,
+            }}>
+              <Upload size={11} /> {importing ? "Parsing..." : "Import Finqalab PDF"}
+            </button>
+            <button onClick={() => { setEditingPosition(null); setShowAddModal(true); }} style={{
+              padding: "5px 12px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`,
+              border: "none", borderRadius: 6, color: C.bg, fontSize: 10, fontWeight: 700, cursor: "pointer",
+            }}>+ Add Position</button>
+          </div>
         </div>
+
+        {importError && (
+          <div style={{
+            padding: "8px 12px", marginBottom: 10, background: "rgba(239,68,68,0.08)",
+            border: `1px solid ${C.redDim}`, borderRadius: 6, fontSize: 10, color: C.red,
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <AlertCircle size={12} /> {importError}
+            <button onClick={() => setImportError(null)} style={{
+              marginLeft: "auto", background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12,
+            }}>×</button>
+          </div>
+        )}
 
         {positions.length === 0 ? (
           <div style={{ padding: 20, textAlign: "center" }}>
-            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>No positions yet</div>
-            <button onClick={() => {
-              setPositions(SAMPLE_PORTFOLIO);
-            }} style={{
-              padding: "6px 14px", background: "transparent", border: `1px solid ${C.border}`,
-              borderRadius: 6, color: C.accent, fontSize: 10, cursor: "pointer",
-            }}>Load Sample Portfolio</button>
+            <div style={{ fontSize: 24, marginBottom: 8 }}>📄</div>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 4 }}>No positions yet</div>
+            <div style={{ fontSize: 10, color: C.textDim, marginBottom: 12 }}>Import your Finqalab PDF or add positions manually</div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button onClick={() => fileInputRef.current?.click()} style={{
+                padding: "8px 16px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`,
+                border: "none", borderRadius: 8, color: C.bg, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+                <Upload size={12} /> Import Finqalab PDF
+              </button>
+              <button onClick={() => {
+                setPositions(SAMPLE_PORTFOLIO);
+              }} style={{
+                padding: "8px 16px", background: "transparent", border: `1px solid ${C.border}`,
+                borderRadius: 8, color: C.textDim, fontSize: 11, cursor: "pointer",
+              }}>Load Sample</button>
+            </div>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -939,6 +1051,110 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
           onClose={() => { setShowAddModal(false); setEditingPosition(null); }}
           editPosition={editingPosition}
         />
+      )}
+
+      {/* Finqalab Import Preview Modal */}
+      {showImportModal && importData && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 1000, backdropFilter: "blur(4px)",
+        }} onClick={() => setShowImportModal(false)}>
+          <div style={{
+            background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
+            padding: 24, width: 560, maxWidth: "90vw", maxHeight: "80vh", overflowY: "auto",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <FileText size={18} color={C.accent} />
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>Finqalab Import Preview</div>
+                <div style={{ fontSize: 11, color: C.textDim }}>
+                  {importData.meta.clientName} · {importData.meta.period} · {importData.trades.length} trades
+                </div>
+              </div>
+            </div>
+
+            {/* Positions preview table */}
+            <div style={{ overflowX: "auto", marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                    {["Ticker", "Shares", "Avg Cost", "Total", "Trades", "In Watchlist"].map(h => (
+                      <th key={h} style={{
+                        padding: "6px 8px", textAlign: h === "Ticker" ? "left" : "right",
+                        color: C.textDim, fontWeight: 600, fontSize: 9, textTransform: "uppercase",
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {importData.positions.map(pos => {
+                    const inWatchlist = !!WATCHLIST_STOCKS[pos.ticker];
+                    return (
+                      <tr key={pos.ticker} style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <td style={{ padding: "6px 8px", fontWeight: 700, color: C.text }}>{pos.ticker}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: C.text }}>{pos.shares}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: C.text }}>₨{pos.avgCost}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: C.text }}>₨{pos.totalInvested.toLocaleString()}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right", color: C.textDim }}>{pos.tradeCount}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                          {inWatchlist ? (
+                            <Check size={12} color={C.green} />
+                          ) : (
+                            <span style={{ fontSize: 9, color: C.amber }}>Not tracked</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Summary */}
+            <div style={{
+              padding: "10px 12px", background: C.bg, borderRadius: 8, marginBottom: 16,
+              border: `1px solid ${C.border}`, fontSize: 11,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: C.textDim }}>Total Positions</span>
+                <b style={{ color: C.text }}>{importData.positions.length}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: C.textDim }}>Total Invested</span>
+                <b style={{ color: C.text }}>₨{importData.positions.reduce((s, p) => s + p.totalInvested, 0).toLocaleString()}</b>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ color: C.textDim }}>Broker Fees</span>
+                <b style={{ color: C.amber }}>₨{importData.positions.reduce((s, p) => s + p.brokerFees, 0).toFixed(2)}</b>
+              </div>
+              {importData.positions.some(p => !WATCHLIST_STOCKS[p.ticker]) && (
+                <div style={{
+                  marginTop: 8, padding: "6px 8px", background: "rgba(245,158,11,0.08)",
+                  borderRadius: 4, fontSize: 10, color: C.amber,
+                }}>
+                  <AlertTriangle size={10} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                  Some tickers aren't in the watchlist yet. They'll be imported but won't show P&L until added to stock data.
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setShowImportModal(false); setImportData(null); }} style={{
+                padding: "8px 16px", background: "transparent", border: `1px solid ${C.border}`,
+                borderRadius: 8, color: C.textMuted, fontSize: 12, cursor: "pointer",
+              }}>Cancel</button>
+              <button onClick={handleConfirmImport} style={{
+                padding: "8px 20px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`,
+                border: "none", borderRadius: 8, color: C.bg, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <Check size={14} /> Import {importData.positions.length} Positions
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
