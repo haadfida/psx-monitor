@@ -54,6 +54,28 @@ CREATE TABLE IF NOT EXISTS import_logs (
   imported_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 4. News cache (one analysis per day, shared across devices)
+CREATE TABLE IF NOT EXISTS news_cache (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  analysis JSONB NOT NULL,
+  fetched_at TIMESTAMPTZ DEFAULT now(),
+  tickers TEXT[] NOT NULL
+);
+
+ALTER TABLE news_cache ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own news cache"
+  ON news_cache FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own news cache"
+  ON news_cache FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own news cache"
+  ON news_cache FOR DELETE USING (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_news_cache_user ON news_cache(user_id, fetched_at DESC);
+
 -- 4. Auto-update updated_at on positions
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
