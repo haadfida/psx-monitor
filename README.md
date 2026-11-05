@@ -20,7 +20,7 @@ A real-time stock monitoring dashboard for Pakistan Stock Exchange (PSX) with AI
   - 🚨 Thesis Breaking — stop loss hit or composite score below 50
   - ⚠️ Macro Risk — position exposed to an active high-severity macro risk
   - 🎯 Analyst Target Reached — price within 5% of consensus target
-  - ⚖️ Rebalance Needed — position too concentrated (>25%)
+  - ⚖️ Rebalance Needed — position too concentrated (>30%)
   - 📈 Good Entry to Add — down more than 10% from entry while score stays 65+
 - **100% Private**: All data stored in browser localStorage — never leaves your device
 - **Sample Portfolio**: One-click load to test features before adding real positions
