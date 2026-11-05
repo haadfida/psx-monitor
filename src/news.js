@@ -1,102 +1,64 @@
 // News Intelligence Module
-// Calls /api/claude serverless proxy (API key stays server-side)
-// Cache: Supabase only. No localStorage.
+// Source depends on key mode (src/config/keyMode.js):
+//   demo         → seeded snapshot (public/data/ai-snapshot.json), no network to Claude
+//   byok/server  → /api/claude serverless proxy, cached 24h via the portfolio store;
+//                  any failure falls back to the snapshot rather than an error state.
 
-import { getNewsCache, saveNewsCache } from "./supabase.js";
+import { getKeyMode } from "./config/keyMode.js";
+import { activeStore } from "./store/portfolioStore.js";
+import { callClaude } from "./ai/client.js";
+import { buildNewsPrompt, extractJson, normalizeNews } from "./ai/prompts.js";
+import { loadSnapshot, formatSnapshotDate } from "./ai/snapshot.js";
 
-// We assume the proxy is available if we're deployed on Vercel
-// For local dev, set VITE_ANTHROPIC_API_KEY in .env
-const HAS_API = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD);
+export function isLiveNewsEnabled() { return getKeyMode() !== "demo"; }
+export function getNewsStatus() {
+  const mode = getKeyMode();
+  return { mode, hasApiKey: mode !== "demo" };
+}
 
-export function isLiveNewsEnabled() { return HAS_API; }
-export function getNewsStatus() { return { hasApiKey: HAS_API }; }
+async function snapshotNews(note) {
+  const snap = await loadSnapshot();
+  const news = snap?.news || { articles: FALLBACK_NEWS, overallSentiment: "mixed", marketSummary: null, topAction: null };
+  return {
+    ...news,
+    isLive: false, isDemo: true, fromCache: true,
+    cacheAge: `${snap?.source || "seeded demo"} · ${formatSnapshotDate(snap?.generatedAt) || "March 2026"}`,
+    generatedAt: snap?.generatedAt || null,
+    demoNote: note || null,
+  };
+}
 
 /**
- * Get news analysis — Supabase cache first, Claude API if stale
+ * Get news analysis.
+ * @param {string[]} tickers
+ * @param {{ allowLive?: boolean }} opts  allowLive=false forces the snapshot
+ *        (e.g. server mode for signed-out visitors, to protect the owner's key)
  */
-export async function getNewsAnalysis(tickers) {
-  if (!HAS_API) {
-    return { articles: [], overallSentiment: null, marketSummary: null, topAction: null, isLive: false, fromCache: false, noApiKey: true };
-  }
+export async function getNewsAnalysis(tickers, { allowLive = true } = {}) {
+  if (getKeyMode() === "demo" || !allowLive) return snapshotNews();
 
-  // Check Supabase cache
-  const cached = await getNewsCache();
+  const store = await activeStore();
+  const cached = await store.getNewsCache();
   if (cached && !cached.isStale) {
-    return {
-      ...cached.analysis,
-      isLive: true, fromCache: true,
-      cacheAge: `${Math.round(cached.ageHours)}h ago`,
-    };
+    return { ...cached.analysis, isLive: true, fromCache: true, cacheAge: `${Math.round(cached.ageHours)}h ago` };
   }
 
-  // Cache stale or empty — fetch fresh
   const fresh = await fetchFromClaude(tickers);
   if (fresh) {
-    await saveNewsCache(fresh, tickers);
+    await store.saveNewsCache(fresh, tickers);
     return { ...fresh, isLive: true, fromCache: false, cacheAge: "just now" };
   }
 
-  // API failed — return stale cache if available
   if (cached) {
     return { ...cached.analysis, isLive: true, fromCache: true, cacheAge: `${Math.round(cached.ageHours)}h ago (stale)` };
   }
 
-  // Nothing works — fallback
-  return { articles: [], overallSentiment: null, marketSummary: "Could not fetch live analysis. Will retry automatically.", topAction: null, isLive: false, fromCache: false };
+  return snapshotNews("Live analysis is unavailable right now — showing the demo snapshot.");
 }
 
 async function fetchFromClaude(tickers) {
-  try {
-    const response = await fetch("/api/claude", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{
-          role: "user",
-          content: `You are a PSX (Pakistan Stock Exchange) portfolio analyst. Search for major news from the last 24 hours that could affect these stocks: ${tickers.join(", ")}
-
-Search broadly:
-- Oil/energy prices, Middle East geopolitics, Iran situation
-- Pakistan monetary policy, SBP rate decisions
-- PKR/USD exchange rate moves
-- IMF program updates
-- Global trade policy, US tariffs, sanctions
-- Climate/weather events affecting Pakistan
-- Infrastructure/CPEC developments
-- Regional conflicts (India-Pakistan, Afghanistan)
-- Sector-specific news (banking, tech, cement, energy, utilities, consumer)
-
-For each item, explain the SPECIFIC transmission mechanism to the affected stocks.
-
-Respond ONLY in valid JSON with no markdown:
-{
-  "articles": [
-    { "headline": "concise headline", "source": "source name", "sentiment": "positive|negative|neutral|mixed", "impactScore": 0-100, "affectedTickers": ["PSO","PPL"], "analysis": "2-3 sentences with specific impact mechanism", "category": "geopolitics|monetary_policy|sector|market|forex|infrastructure|climate|macro", "urgency": "immediate|soon|watch" }
-  ],
-  "overallSentiment": "positive|negative|neutral|mixed",
-  "marketSummary": "2-3 sentence PSX outlook today",
-  "topAction": "single most important action for this portfolio"
-}`
-        }],
-      }),
-    });
-
-    if (!response.ok) { console.error("Claude API:", response.status); return null; }
-
-    const data = await response.json();
-    const text = (data.content?.filter(b => b.type === "text") || []).map(b => b.text).join("");
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-
-    const parsed = JSON.parse(match[0]);
-    parsed.articles = (parsed.articles || []).map((a, i) => ({
-      ...a, id: `live-${Date.now()}-${i}`, timestamp: new Date().toISOString(), tags: [a.category],
-    }));
-    return parsed;
-  } catch (err) { console.error("Claude fetch failed:", err); return null; }
+  const text = await callClaude(buildNewsPrompt(tickers), 16000);
+  return normalizeNews(extractJson(text), `live-${Date.now()}`);
 }
 
 // ============================================================

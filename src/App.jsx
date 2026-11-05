@@ -9,7 +9,7 @@ import {
   Activity, ArrowUpRight, ArrowDownRight, Clock, Zap, Shield, Target,
   Newspaper, Globe, ChevronRight, ExternalLink, AlertCircle, CheckCircle,
   XCircle, Minus, Filter, Lock, Briefcase, Plus, Edit2, Trash2, Upload,
-  FileText, Check, RefreshCw, Wifi, WifiOff, Loader,
+  FileText, Check, RefreshCw, Wifi, WifiOff, Loader, Settings, KeyRound,
 } from "lucide-react";
 import {
   WATCHLIST_STOCKS, KSE100_DATA, SECTOR_DATA, MACRO_FACTORS, computeScore,
@@ -23,6 +23,11 @@ import {
   SIGNAL_TYPES, SAMPLE_PORTFOLIO, getMonthlyAdvice,
 } from "./portfolio.js";
 import { parseFinqalabText } from "./finqalab-parser.js";
+import {
+  getKeyMode, getByokKey, setByokKey, clearByokKey, onKeyModeChange,
+} from "./config/keyMode.js";
+import { storeFor, localAdapter, isSupabaseConfigured, getSupabase } from "./store/portfolioStore.js";
+import { loadSnapshot, formatSnapshotDate } from "./ai/snapshot.js";
 
 const C = {
   bg: "#0a0f1a", card: "#111827", cardHover: "#1a2236",
@@ -176,7 +181,7 @@ function MacroFactorsPanel() {
   );
 }
 
-function NewsFeedPanel({ selectedStock, user }) {
+function NewsFeedPanel({ selectedStock, user, keyMode }) {
   const [newsFilter, setNewsFilter] = useState("all");
   const [liveNews, setLiveNews] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -186,16 +191,17 @@ function NewsFeedPanel({ selectedStock, user }) {
 
   const tickers = Object.keys(WATCHLIST_STOCKS);
 
-  // Fetch live news on mount — ONLY if logged in
+  // Load on mount. Demo mode reads the seeded snapshot. Server mode (owner's key)
+  // only goes live for signed-in users; BYOK always may.
   useEffect(() => {
-    if (!status.hasApiKey || !user) return;
+    const allowLive = keyMode === "byok" || (keyMode === "server" && !!user);
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const result = await getNewsAnalysis(tickers);
+        const result = await getNewsAnalysis(tickers, { allowLive });
         if (!cancelled) {
           setLiveNews(result);
           setCacheInfo({
@@ -212,7 +218,7 @@ function NewsFeedPanel({ selectedStock, user }) {
     }
     load();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, keyMode]);
 
   // Determine which articles to show
   const articles = liveNews?.articles || [];
@@ -225,11 +231,15 @@ function NewsFeedPanel({ selectedStock, user }) {
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
           <Newspaper size={14} color={C.accent} /> News Intelligence
           {liveNews?.isLive ? (
             <span style={{ fontSize: 8, color: C.green, background: "rgba(16,185,129,0.12)", padding: "2px 6px", borderRadius: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>
               <Wifi size={8} /> LIVE
+            </span>
+          ) : liveNews?.isDemo ? (
+            <span style={{ fontSize: 8, color: C.amber, background: "rgba(245,158,11,0.12)", padding: "2px 6px", borderRadius: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>
+              <WifiOff size={8} /> DEMO
             </span>
           ) : (
             <span style={{ fontSize: 8, color: C.textDim, background: "rgba(100,116,139,0.12)", padding: "2px 6px", borderRadius: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 3 }}>
@@ -238,8 +248,8 @@ function NewsFeedPanel({ selectedStock, user }) {
           )}
         </div>
         {cacheInfo && (
-          <span style={{ fontSize: 8, color: C.textDim }}>
-            {cacheInfo.fromCache ? `Updated ${cacheInfo.cacheAge}` : "Just updated"}
+          <span style={{ fontSize: 8, color: C.textDim, textAlign: "right", marginLeft: 8 }}>
+            {liveNews?.isDemo ? cacheInfo.cacheAge : cacheInfo.fromCache ? `Updated ${cacheInfo.cacheAge}` : "Just updated"}
           </span>
         )}
       </div>
@@ -332,6 +342,7 @@ function NewsFeedPanel({ selectedStock, user }) {
           {news.map(n => {
             const scfg = SENTIMENT_CONFIG[n.sentiment] || SENTIMENT_CONFIG.neutral;
             const time = new Date(n.timestamp);
+            // eslint-disable-next-line react-hooks/purity -- relative-time label; existing behaviour
             const hoursAgo = Math.round((Date.now() - time.getTime()) / 3600000);
             return (
               <div key={n.id} style={{
@@ -390,30 +401,34 @@ function NewsFeedPanel({ selectedStock, user }) {
             <div style={{ padding: 24, textAlign: "center" }}>
               <Newspaper size={24} color={C.textDim} style={{ marginBottom: 8, opacity: 0.5 }} />
               <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 4 }}>
-                {!liveNews?.isLive
+                {!liveNews?.isLive && !liveNews?.isDemo
                   ? "News analysis not yet available"
                   : newsFilter === "stock"
                     ? `No recent news affecting ${selectedStock}`
                     : "No news articles found"}
               </div>
               <div style={{ fontSize: 10, color: C.textDim }}>
-                {!liveNews?.isLive
-                  ? "Sign in and ensure your API key is configured to enable live analysis."
-                  : "Check back later — analysis refreshes every 24 hours."}
+                {liveNews?.isDemo
+                  ? "The demo snapshot has no items for this filter."
+                  : !liveNews?.isLive
+                    ? "Add your Anthropic key in AI settings to enable live analysis."
+                    : "Check back later — analysis refreshes every 24 hours."}
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* No API key message */}
-      {!status.hasApiKey && (
+      {/* Demo / fallback note */}
+      {liveNews?.isDemo && (
         <div style={{
           marginTop: 10, padding: "8px 10px", background: "rgba(245,158,11,0.06)",
           border: `1px solid rgba(245,158,11,0.15)`, borderRadius: 6,
           fontSize: 9, color: C.textDim,
         }}>
-          Add VITE_ANTHROPIC_API_KEY to .env for live news analysis. Showing static fallback data.
+          {liveNews.demoNote || (keyMode === "server" && !user
+            ? "Sign in for live analysis. Showing the seeded demo snapshot."
+            : "Seeded demo snapshot. Add your own Anthropic key in AI settings for live analysis.")}
         </div>
       )}
     </div>
@@ -847,7 +862,7 @@ function AddPositionModal({ onAdd, onClose, editPosition }) {
   );
 }
 
-function PortfolioPanel({ positions, setPositions, onStockSelect }) {
+function PortfolioPanel({ positions, setPositions, onStockSelect, user, keyMode }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPosition, setEditingPosition] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -876,7 +891,8 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
     async function load() {
       setAdviceLoading(true);
       try {
-        const advice = await getMonthlyAdvice(positions, 50000);
+        const allowLive = keyMode === "byok" || (keyMode === "server" && !!user);
+        const advice = await getMonthlyAdvice(positions, 50000, { allowLive });
         if (!cancelled && advice) setMonthlyAdvice(advice);
       } catch (err) {
         console.error("Advice failed:", err);
@@ -886,7 +902,7 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
     }
     load();
     return () => { cancelled = true; };
-  }, [positions.length]); // only re-fetch if position count changes
+  }, [positions.length, keyMode, user]); // only re-fetch if position count or key mode changes
 
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -1068,7 +1084,7 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
             </div>
             {monthlyAdvice?._cacheAge && (
               <span style={{ fontSize: 8, color: C.textDim }}>
-                {monthlyAdvice._fromCache ? `Updated ${monthlyAdvice._cacheAge}` : "Fresh analysis"}
+                {monthlyAdvice._demo ? monthlyAdvice._cacheAge : monthlyAdvice._fromCache ? `Updated ${monthlyAdvice._cacheAge}` : "Fresh analysis"}
               </span>
             )}
           </div>
@@ -1083,6 +1099,11 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
 
           {monthlyAdvice && !adviceLoading && (
             <div>
+              {monthlyAdvice._demo && (
+                <div style={{ fontSize: 9, color: C.textDim, marginBottom: 8 }}>
+                  {monthlyAdvice._demoNote || "Sample advice for the demo portfolio. Add your own Anthropic key in AI settings for advice on your positions."}
+                </div>
+              )}
               {/* Market condition badge */}
               <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                 <span style={{
@@ -1246,7 +1267,7 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
                       </div>
                       <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
                         Avg ₨{pos.avgCost} → ₨{pos.currentPrice}
-                        {originalPos?.notes && <span style={{ marginLeft: 6, fontStyle: "italic" }}>"{originalPos.notes}"</span>}
+                        {originalPos?.notes && <span style={{ marginLeft: 6, fontStyle: "italic" }}>&quot;{originalPos.notes}&quot;</span>}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -1390,7 +1411,7 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
                   borderRadius: 4, fontSize: 10, color: C.amber,
                 }}>
                   <AlertTriangle size={10} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-                  Some tickers aren't in the watchlist yet. They'll be imported but won't show P&L until added to stock data.
+                  Some tickers aren&apos;t in the watchlist yet. They&apos;ll be imported but won&apos;t show P&L until added to stock data.
                 </div>
               )}
             </div>
@@ -1416,6 +1437,79 @@ function PortfolioPanel({ positions, setPositions, onStockSelect }) {
   );
 }
 
+function DemoBadge({ snapshotDate, onClick }) {
+  return (
+    <button onClick={onClick} title="Open AI settings" style={{
+      background: "rgba(245,158,11,0.10)", color: C.amber, border: `1px solid rgba(245,158,11,0.25)`,
+      padding: "3px 10px", borderRadius: 10, fontSize: 9, fontWeight: 600, cursor: "pointer",
+      display: "flex", alignItems: "center", gap: 5, marginLeft: 6, whiteSpace: "nowrap",
+    }}>
+      <KeyRound size={10} />
+      Demo data as of {snapshotDate || "March 2026"} · Add your own Anthropic key for live analysis
+    </button>
+  );
+}
+
+function SettingsModal({ onClose, keyMode }) {
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState(!!getByokKey());
+  const inputStyle = { width: "100%", padding: "10px 12px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, outline: "none", fontFamily: "inherit", boxSizing: "border-box" };
+  const save = () => {
+    if (!value.trim()) return;
+    setByokKey(value);
+    setValue("");
+    setSaved(true);
+  };
+  const remove = () => { clearByokKey(); setSaved(false); };
+  return (
+    <div role="dialog" aria-label="AI settings" style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex",
+      alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(4px)",
+    }} onClick={onClose}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, width: 420, maxWidth: "90vw" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+          <Settings size={16} color={C.accent} /> AI settings
+        </div>
+        <div style={{ fontSize: 11, color: C.textDim, marginBottom: 14, lineHeight: 1.6 }}>
+          Mode: <b style={{ color: keyMode === "demo" ? C.amber : C.green }}>
+            {keyMode === "byok" ? "Live (your key)" : keyMode === "server" ? "Live (site key)" : "Demo snapshot"}
+          </b>
+          <br />
+          Add an Anthropic API key to get live news analysis and monthly advice from Claude.
+          The key is stored only in this browser (localStorage) and sent with each analysis
+          request to this site&apos;s <code>/api/claude</code> function, which forwards it to Anthropic
+          and does not store or log it. Requests are billed to your Anthropic account.
+        </div>
+        {saved ? (
+          <div style={{ padding: "8px 10px", marginBottom: 12, background: "rgba(16,185,129,0.08)", borderRadius: 6, fontSize: 11, color: C.green, display: "flex", alignItems: "center", gap: 6 }}>
+            <Check size={12} /> A key is saved in this browser.
+          </div>
+        ) : null}
+        <input type="password" autoComplete="off" spellCheck={false} placeholder={saved ? "Replace key (sk-ant-...)" : "sk-ant-..."}
+          aria-label="Anthropic API key" value={value} onChange={e => setValue(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && save()} style={{ ...inputStyle, marginBottom: 12 }} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} disabled={!value.trim()} style={{
+            flex: 1, padding: "10px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`, border: "none",
+            borderRadius: 8, color: C.bg, fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: value.trim() ? 1 : 0.5,
+          }}>Save key</button>
+          {saved && (
+            <button onClick={remove} style={{
+              padding: "10px 14px", background: "transparent", border: `1px solid ${C.border}`,
+              borderRadius: 8, color: C.textMuted, fontSize: 12, cursor: "pointer",
+            }}>Remove key</button>
+          )}
+          <button onClick={onClose} style={{
+            padding: "10px 14px", background: "transparent", border: `1px solid ${C.border}`,
+            borderRadius: 8, color: C.textMuted, fontSize: 12, cursor: "pointer",
+          }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [selectedStock, setSelectedStock] = useState("PSO");
   const [filter, setFilter] = useState("all");
@@ -1430,53 +1524,73 @@ export default function App() {
   const [authError, setAuthError] = useState(null);
   const [authMode, setAuthMode] = useState("signin"); // "signin" or "signup"
 
-  // Check auth on mount and load positions from Supabase
-  useEffect(() => {
-    async function init() {
-      const { getSession, onAuthStateChange } = await import("./supabase.js");
-      const session = await getSession();
-      if (session?.user) {
-        setUser(session.user);
-        const { loadPositions } = await import("./supabase.js");
-        const pos = await loadPositions();
-        setPositions(pos);
-      }
-      setAuthLoading(false);
+  const [keyMode, setKeyMode] = useState(() => getKeyMode());
+  const [showSettings, setShowSettings] = useState(false);
+  const [snapshotDate, setSnapshotDate] = useState(null);
+  const supabaseOn = isSupabaseConfigured();
 
-      // Listen for auth changes
-      onAuthStateChange(async (u) => {
-        setUser(u);
-        if (u) {
-          const { loadPositions } = await import("./supabase.js");
-          const pos = await loadPositions();
-          setPositions(pos);
-        } else {
-          setPositions([]);
-        }
-      });
-    }
-    init();
+  useEffect(() => onKeyModeChange(setKeyMode), []);
+  useEffect(() => {
+    loadSnapshot().then(snap => setSnapshotDate(formatSnapshotDate(snap?.generatedAt) || null));
   }, []);
 
-  // Save positions to Supabase — debounced to avoid rapid fire
-  const positionsLoaded = useRef(false);
-  useEffect(() => {
-    if (!user || positions.length === 0) return;
-    // Skip the first render (positions loaded from Supabase, no need to save back)
-    if (!positionsLoaded.current) {
-      positionsLoaded.current = true;
-      return;
+  // Positions come from the portfolio store: localStorage by default, Supabase
+  // only when configured and signed in. First keyless visit seeds the sample.
+  const positionsReady = useRef(false); // nothing is saved until the first load lands
+  const skipNextSave = useRef(false);
+  const loadPositionsFor = useCallback(async (u) => {
+    const store = storeFor(u);
+    if (store === localAdapter && !localAdapter.hasSavedPositions() && getKeyMode() === "demo") {
+      await localAdapter.savePositions(SAMPLE_PORTFOLIO);
     }
-    const timeout = setTimeout(async () => {
-      const { savePositions } = await import("./supabase.js");
-      await savePositions(positions);
-    }, 2000); // wait 2s after last change
+    const pos = await store.loadPositions();
+    positionsReady.current = true;
+    skipNextSave.current = true;
+    setPositions(pos);
+  }, []);
+
+  useEffect(() => {
+    let unsub = null;
+    let cancelled = false;
+    async function init() {
+      const sb = await getSupabase();
+      let u = null;
+      if (sb) {
+        const session = await sb.getSession().catch(() => null);
+        u = session?.user || null;
+      }
+      if (cancelled) return;
+      setUser(u);
+      await loadPositionsFor(u);
+      setAuthLoading(false);
+      if (sb) {
+        const { data } = sb.onAuthStateChange(async (nextUser) => {
+          setUser(nextUser);
+          await loadPositionsFor(nextUser);
+        });
+        unsub = data?.subscription;
+      }
+    }
+    init();
+    return () => { cancelled = true; unsub?.unsubscribe?.(); };
+  }, [loadPositionsFor]);
+
+  // Persist positions — debounced; skipped right after a load.
+  useEffect(() => {
+    if (!positionsReady.current) return;
+    if (skipNextSave.current) { skipNextSave.current = false; return; }
+    const store = storeFor(user);
+    // Supabase upserts rows and can't express "empty", so don't send [] there.
+    if (store !== localAdapter && positions.length === 0) return;
+    const timeout = setTimeout(() => { store.savePositions(positions); }, store === localAdapter ? 300 : 2000);
     return () => clearTimeout(timeout);
   }, [positions, user]);
 
   const handleAuth = async () => {
     setAuthError(null);
-    const { signIn, signUp } = await import("./supabase.js");
+    const sb = await getSupabase();
+    if (!sb) { setAuthError("Sync is not configured on this site."); return; }
+    const { signIn, signUp } = sb;
     const { data, error } = authMode === "signin"
       ? await signIn(authEmail, authPassword)
       : await signUp(authEmail, authPassword);
@@ -1489,10 +1603,10 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    const { signOut } = await import("./supabase.js");
-    await signOut();
+    const sb = await getSupabase();
+    if (sb) await sb.signOut();
     setUser(null);
-    setPositions([]);
+    await loadPositionsFor(null);
   };
 
   const allSignals = useMemo(() => {
@@ -1564,18 +1678,30 @@ export default function App() {
                 color: C.textDim, fontSize: 8, padding: "2px 6px", cursor: "pointer",
               }}>Sign Out</button>
             </span>
-          ) : (
+          ) : supabaseOn ? (
             <button onClick={() => setShowAuth(true)} style={{
               background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`, border: "none",
               borderRadius: 6, color: C.bg, fontSize: 9, fontWeight: 700, padding: "4px 10px", cursor: "pointer",
             }}>Sign In</button>
+          ) : null}
+          {keyMode === "demo" ? (
+            <DemoBadge snapshotDate={snapshotDate} onClick={() => setShowSettings(true)} />
+          ) : (
+            <span style={{ background: "rgba(16,185,129,0.12)", color: C.green, padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600, marginLeft: 6 }}>
+              ● LIVE{keyMode === "byok" ? " · your key" : ""}
+            </span>
           )}
-          <span style={{ background: "rgba(16,185,129,0.12)", color: C.green, padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 600, marginLeft: 6 }}>● LIVE</span>
+          <button onClick={() => setShowSettings(true)} aria-label="AI settings" title="AI settings" style={{
+            background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6,
+            color: C.textDim, padding: "3px 5px", cursor: "pointer", display: "flex", alignItems: "center",
+          }}><Settings size={12} /></button>
         </div>
       </div>
 
+      {showSettings && <SettingsModal keyMode={keyMode} onClose={() => setShowSettings(false)} />}
+
       {/* Auth Modal */}
-      {showAuth && (
+      {showAuth && supabaseOn && (
         <div style={{
           position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
           background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center",
@@ -1672,7 +1798,7 @@ export default function App() {
               ))}
             </div>
             {activePanel === "news" ? (
-              <NewsFeedPanel selectedStock={selectedStock} user={user} />
+              <NewsFeedPanel selectedStock={selectedStock} user={user} keyMode={keyMode} />
             ) : (
               <MacroFactorsPanel />
             )}
@@ -1685,24 +1811,29 @@ export default function App() {
         </div>
           </>
         ) : (
-          /* PORTFOLIO VIEW — requires auth */
-          !user ? (
-            <div style={{ padding: 40, textAlign: "center" }}>
-              <Lock size={32} color={C.textDim} style={{ marginBottom: 12 }} />
-              <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: 6 }}>Sign in to access your portfolio</div>
-              <div style={{ fontSize: 12, color: C.textDim, marginBottom: 16 }}>Your positions, signals, and advice are stored securely in Supabase.</div>
-              <button onClick={() => setShowAuth(true)} style={{
-                padding: "10px 24px", background: `linear-gradient(135deg, ${C.accent}, ${C.blue})`,
-                border: "none", borderRadius: 8, color: C.bg, fontSize: 13, fontWeight: 700, cursor: "pointer",
-              }}>Sign In / Create Account</button>
-            </div>
-          ) : (
+          /* PORTFOLIO VIEW — localStorage by default, Supabase sync when signed in */
+          (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 14 }}>
+              <div>
+              {supabaseOn && !user && (
+                <div style={{
+                  padding: "8px 12px", marginBottom: 10, background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: 8, fontSize: 10, color: C.textDim, display: "flex", alignItems: "center", gap: 8,
+                }}>
+                  <Lock size={11} /> Positions are saved in this browser.
+                  <button onClick={() => setShowAuth(true)} style={{
+                    background: "none", border: "none", color: C.accent, cursor: "pointer", fontSize: 10, padding: 0,
+                  }}>Sign in to sync across devices</button>
+                </div>
+              )}
               <PortfolioPanel
                 positions={positions}
                 setPositions={setPositions}
                 onStockSelect={(t) => { setSelectedStock(t); setView("dashboard"); }}
+                user={user}
+                keyMode={keyMode}
               />
+              </div>
               <div>
                 <DetailPanel ticker={selectedStock} stock={WATCHLIST_STOCKS[selectedStock]} />
               </div>
@@ -1720,7 +1851,7 @@ export default function App() {
           <AlertTriangle size={13} color={C.amber} style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
             <b style={{ color: C.amber }}>Disclaimer:</b> For informational purposes only — not financial advice.
-            Portfolio data is stored locally in your browser only — never sent to any server.
+            Portfolio data is stored in your browser unless you sign in to sync. With live AI enabled, holdings are sent to Claude to generate advice.
             Data reflects analyst estimates as of mid-March 2026. Always consult a SECP-registered broker before investing.
           </span>
         </div>

@@ -1,5 +1,6 @@
 # PSX Monitor — Pakistan Stock Exchange Intelligence Dashboard
 
+[![CI](https://github.com/haadfida/psx-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/haadfida/psx-monitor/actions/workflows/ci.yml)
 A real-time stock monitoring dashboard for Pakistan Stock Exchange (PSX) with AI-powered news analysis.
 
 ## Features
@@ -43,19 +44,25 @@ npm run dev
 
 Open http://localhost:5173
 
-## Enable Live News (Optional)
+## AI analysis modes
 
-1. Get an API key from https://console.anthropic.com
-2. Copy `.env.example` to `.env`
-3. Add your key: `VITE_ANTHROPIC_API_KEY=sk-ant-...`
-4. Restart the dev server
+The site works with no keys at all. `src/config/keyMode.js` picks one of:
 
-With the API key, the app will:
-- Fetch live news via Claude's web search tool
-- Analyze news impact on each stock using Claude Sonnet
-- Generate sentiment scores and actionable insights
+| Mode | When | Where analysis comes from |
+|---|---|---|
+| `demo` (default) | no key anywhere | `public/data/ai-snapshot.json` (seeded snapshot, labelled in the header) |
+| `byok` | a visitor saves their own key in **AI settings** (gear icon) | `/api/claude` with the key in the `x-anthropic-key` header; key kept in this browser's localStorage only |
+| `server` | `VITE_AI_MODE=server` and `ANTHROPIC_API_KEY` set on the deployment | `/api/claude` with the server key, for signed-in users |
 
-Without the key, the app uses curated fallback news data.
+Live calls use `claude-opus-5-5` with the `web_search_20260209` tool. If a live call fails, the panels fall back to the snapshot.
+
+To refresh the demo snapshot with a real run (costs API credits):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... node scripts/build-ai-snapshot.mjs
+```
+
+Portfolio data lives in localStorage by default. Set `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` to enable sign-in and cross-device sync (`src/store/portfolioStore.js`).
 
 ## Deploy to Vercel (Free)
 
@@ -77,7 +84,7 @@ vercel
    ```
 2. Go to https://vercel.com/new
 3. Import your GitHub repo
-4. Add environment variable: `VITE_ANTHROPIC_API_KEY` (if using live news)
+4. Optionally add `ANTHROPIC_API_KEY` + `VITE_AI_MODE=server` (live news) and Supabase vars (sync)
 5. Deploy — done!
 
 Vercel auto-deploys on every push to main.
