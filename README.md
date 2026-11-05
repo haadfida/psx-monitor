@@ -16,15 +16,12 @@ A real-time stock monitoring dashboard for Pakistan Stock Exchange (PSX) with AI
 ### 🔒 Private Portfolio (NEW)
 - **Position Tracking**: Add your holdings with buy price, shares, target sell, and stop loss
 - **P&L Dashboard**: Real-time unrealized gains/losses per position and total
-- **Sell Signal Engine**: 8 types of automated sell signals:
-  - 🛑 Stop Loss Hit — immediate action
-  - 🎯 Target Price Reached — take profit
-  - 📉 Trailing Stop — protect gains after pullback
-  - 💰 Partial Profit — near analyst target
-  - ⚠️ News Risk — high-impact negative news
-  - 📊 Score Drop — fundamentals weakening
-  - ⚖️ Overweight — position too concentrated (>25%)
-  - 🔒 Lock Gains — unrealized profit >30%
+- **Sell Signal Engine**: thesis-based signals, not daily noise:
+  - 🚨 Thesis Breaking — stop loss hit or composite score below 50
+  - ⚠️ Macro Risk — position exposed to an active high-severity macro risk
+  - 🎯 Analyst Target Reached — price within 5% of consensus target
+  - ⚖️ Rebalance Needed — position too concentrated (>25%)
+  - 📈 Good Entry to Add — down more than 10% from entry while score stays 65+
 - **100% Private**: All data stored in browser localStorage — never leaves your device
 - **Sample Portfolio**: One-click load to test features before adding real positions
 
