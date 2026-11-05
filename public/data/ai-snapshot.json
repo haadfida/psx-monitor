@@ -1,0 +1,266 @@
+{
+  "generatedAt": "2026-03-19T12:00:00Z",
+  "source": "seeded demo",
+  "model": null,
+  "note": "Hand-seeded from the curated March 2026 news and analyst data bundled with PSX Monitor. Not live analysis. Regenerate with scripts/build-ai-snapshot.mjs and an Anthropic API key.",
+  "tickers": [
+    "PSO",
+    "MEBL",
+    "UBL",
+    "SYS",
+    "LUCK",
+    "PPL",
+    "HBL",
+    "MCB",
+    "ENGROH",
+    "MARI",
+    "OGDC",
+    "PAEL",
+    "SNGP",
+    "MZNPETF"
+  ],
+  "news": {
+    "articles": [
+      {
+        "id": "n1",
+        "headline": "Iran conflict pushes Brent crude above $85, Hormuz transit disrupted",
+        "source": "Reuters",
+        "timestamp": "2026-03-19T08:30:00Z",
+        "category": "geopolitics",
+        "sentiment": "negative",
+        "impactScore": 85,
+        "affectedTickers": [
+          "PSO",
+          "PPL",
+          "OGDC",
+          "MARI"
+        ],
+        "analysis": "Oil price surge inflates Pakistan's import bill. PSO margins compress — govt caps retail prices while crude input costs rise. PPL/OGDC benefit from higher wellhead gas prices but circular debt delays cash realization.",
+        "tags": [
+          "oil",
+          "iran"
+        ],
+        "urgency": "immediate"
+      },
+      {
+        "id": "n2",
+        "headline": "SBP holds policy rate at 10.5%",
+        "source": "Business Recorder",
+        "timestamp": "2026-03-18T14:00:00Z",
+        "category": "monetary_policy",
+        "sentiment": "neutral",
+        "impactScore": 70,
+        "affectedTickers": [
+          "UBL",
+          "HBL",
+          "MCB",
+          "MEBL"
+        ],
+        "analysis": "Rate pause preserves bank NIMs. UBL/HBL/MCB earn spread on 10.5% lending vs 7-8% deposit costs. MEBL less affected — Islamic profit-sharing adjusts with lag.",
+        "tags": [
+          "SBP",
+          "banking"
+        ],
+        "urgency": "watch"
+      },
+      {
+        "id": "n3",
+        "headline": "Pakistan IT exports surge 23% YoY",
+        "source": "Dawn Business",
+        "timestamp": "2026-03-17T10:00:00Z",
+        "category": "sector",
+        "sentiment": "positive",
+        "impactScore": 65,
+        "affectedTickers": [
+          "SYS"
+        ],
+        "analysis": "SYS captures ~15% of listed IT export revenue. Each 1% PKR depreciation adds ~₨0.4 to EPS through translation gains.",
+        "tags": [
+          "IT",
+          "SYS"
+        ],
+        "urgency": "watch"
+      },
+      {
+        "id": "n4",
+        "headline": "KSE-100 corrects 10% from ATH",
+        "source": "The News Intl",
+        "timestamp": "2026-03-18T16:00:00Z",
+        "category": "market",
+        "sentiment": "negative",
+        "impactScore": 60,
+        "affectedTickers": [
+          "UBL",
+          "HBL",
+          "MCB",
+          "MEBL",
+          "PSO",
+          "PPL",
+          "SYS",
+          "LUCK",
+          "OGDC"
+        ],
+        "analysis": "Broad correction after 65% rally. High-beta stocks (UBL β1.49, PPL β1.45) fell 15-18%. Low-beta MEBL/MCB held better.",
+        "tags": [
+          "KSE-100"
+        ],
+        "urgency": "soon"
+      },
+      {
+        "id": "n5",
+        "headline": "PKR weakens to 282/USD",
+        "source": "Business Recorder",
+        "timestamp": "2026-03-19T09:00:00Z",
+        "category": "forex",
+        "sentiment": "mixed",
+        "impactScore": 55,
+        "affectedTickers": [
+          "SYS",
+          "PSO",
+          "LUCK"
+        ],
+        "analysis": "SYS benefits (USD revenues). PSO import bill rises. LUCK cement exports become more competitive.",
+        "tags": [
+          "PKR"
+        ],
+        "urgency": "soon"
+      },
+      {
+        "id": "n6",
+        "headline": "CPEC Phase II: $2.3B projects approved",
+        "source": "Dawn Business",
+        "timestamp": "2026-03-16T11:00:00Z",
+        "category": "infrastructure",
+        "sentiment": "positive",
+        "impactScore": 60,
+        "affectedTickers": [
+          "LUCK",
+          "PAEL"
+        ],
+        "analysis": "ML-1 railway and motorways consume ~2M tons cement annually. LUCK holds 15% northern market share. PAEL supplies switchgear.",
+        "tags": [
+          "CPEC"
+        ],
+        "urgency": "watch"
+      },
+      {
+        "id": "n7",
+        "headline": "IMF review: circular debt resolution progressing",
+        "source": "Reuters",
+        "timestamp": "2026-03-15T08:00:00Z",
+        "category": "macro",
+        "sentiment": "positive",
+        "impactScore": 75,
+        "affectedTickers": [
+          "PSO",
+          "PPL",
+          "OGDC",
+          "SNGP",
+          "UBL",
+          "HBL"
+        ],
+        "analysis": "Govt owes PSO ~₨300B — each ₨50B recovery unlocks working capital. PPL/OGDC/SNGP similarly exposed.",
+        "tags": [
+          "IMF"
+        ],
+        "urgency": "soon"
+      },
+      {
+        "id": "n8",
+        "headline": "Remittances hit $3.29B in February",
+        "source": "Business Recorder",
+        "timestamp": "2026-03-17T14:00:00Z",
+        "category": "macro",
+        "sentiment": "positive",
+        "impactScore": 50,
+        "affectedTickers": [
+          "MEBL",
+          "UBL",
+          "HBL"
+        ],
+        "analysis": "Higher remittances = more CASA deposits = lower funding costs for banks. UBL Middle East branches capture flows directly.",
+        "tags": [
+          "remittances"
+        ],
+        "urgency": "watch"
+      },
+      {
+        "id": "n9",
+        "headline": "NDMA warns monsoon 26% above average",
+        "source": "The News Intl",
+        "timestamp": "2026-03-14T12:00:00Z",
+        "category": "climate",
+        "sentiment": "negative",
+        "impactScore": 45,
+        "affectedTickers": [
+          "LUCK",
+          "PPL",
+          "OGDC"
+        ],
+        "analysis": "2022 floods disrupted cement dispatches for 2 months and damaged wellhead infrastructure. Similar risk ahead.",
+        "tags": [
+          "monsoon"
+        ],
+        "urgency": "watch"
+      },
+      {
+        "id": "n10",
+        "headline": "Engro subsidiary reports strong fertilizer demand",
+        "source": "Dawn Business",
+        "timestamp": "2026-03-18T10:00:00Z",
+        "category": "sector",
+        "sentiment": "positive",
+        "impactScore": 45,
+        "affectedTickers": [
+          "ENGROH"
+        ],
+        "analysis": "EFERT dividend is 60% of ENGROH income. Strong Rabi urea offtake signals healthy payout.",
+        "tags": [
+          "engro"
+        ],
+        "urgency": "watch"
+      }
+    ],
+    "overallSentiment": "mixed",
+    "marketSummary": "KSE-100 is consolidating about 10% below its January high as oil above $85 and a softer rupee weigh on importers. The SBP hold at 10.5%, steady IMF progress on circular debt and record remittances keep the medium-term picture constructive for banks and E&Ps.",
+    "topAction": "Your PSO position is overweight and exposed to the oil spike: trim it, and use this month's budget to add to OGDC and PPL rather than chasing more PSO."
+  },
+  "advice": {
+    "summary": "The market is digesting a 10% correction driven by oil and geopolitics, not by weaker earnings. Keep buying gradually: tilt this month’s ₨50,000 toward cheap, cash-generative E&Ps and a dividend bank, and keep a small cash buffer in case the Hormuz situation deepens the pullback.",
+    "marketCondition": "volatile",
+    "allocations": [
+      {
+        "ticker": "OGDC",
+        "amount": 15000,
+        "reason": "P/E 5.5 with a 6.2% yield; adding to your OGDC position on oil-driven weakness lowers your average cost while wellhead prices and circular-debt recovery help."
+      },
+      {
+        "ticker": "PPL",
+        "amount": 12000,
+        "reason": "You are down about 13% on PPL but its score is still strong; averaging down with this month's budget is reasonable while the gas thesis holds."
+      },
+      {
+        "ticker": "SYS",
+        "amount": 10000,
+        "reason": "Down about 15% from your entry with USD revenues benefiting from a weaker rupee; a measured top-up improves your average."
+      },
+      {
+        "ticker": "MEBL",
+        "amount": 8000,
+        "reason": "Shariah core holding that held up best in the correction; adds on weakness."
+      }
+    ],
+    "rotations": [
+      {
+        "sell": "PSO",
+        "buy": "OGDC",
+        "reason": "PSO is about a third of your portfolio and exposed to the oil spike and circular debt; trimming it and rotating into OGDC cuts concentration and adds yield."
+      }
+    ],
+    "holdCash": {
+      "amount": 5000,
+      "reason": "Keep about 10% dry powder in case oil-driven volatility offers better entries later in the month."
+    },
+    "keyRisk": "A prolonged Strait of Hormuz disruption keeping Brent above $90, which would widen the current-account deficit and pressure the PKR."
+  }
+}

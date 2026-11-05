@@ -97,108 +97,52 @@ export function generateSellSignals(position, stock, portfolioValue) {
 
 // ============================================================
 // MONTHLY ALLOCATION ADVISOR
-// Cached 30 days in Supabase. No localStorage.
+// demo → seeded snapshot. byok/server → /api/claude, cached 30 days in the
+// portfolio store (localStorage, or Supabase when signed in).
 // ============================================================
 
-import { getAdviceCache, saveAdviceCache } from "./supabase.js";
+import { getKeyMode } from "./config/keyMode.js";
+import { activeStore } from "./store/portfolioStore.js";
+import { callClaude } from "./ai/client.js";
+import { buildAdvicePrompt, extractJson } from "./ai/prompts.js";
+import { loadSnapshot, formatSnapshotDate } from "./ai/snapshot.js";
 
-const HAS_API = !!(import.meta.env.VITE_ANTHROPIC_API_KEY || import.meta.env.PROD);
+async function snapshotAdvice(note) {
+  const snap = await loadSnapshot();
+  if (!snap?.advice) return null;
+  return {
+    ...snap.advice,
+    _demo: true,
+    _fromCache: true,
+    _cacheAge: `${snap.source || "seeded demo"} · ${formatSnapshotDate(snap.generatedAt)}`,
+    _demoNote: note || null,
+  };
+}
 
 /**
- * Get monthly advice — Supabase cache first, Claude API if >30 days
+ * Get monthly advice.
+ * @param {{ allowLive?: boolean }} opts  allowLive=false forces the snapshot
  */
-export async function getMonthlyAdvice(positions, budget = 50000) {
-  if (!HAS_API) {
-    return { summary: "Add your Anthropic API key for personalized allocation advice.", allocations: [], rotations: [], _noKey: true };
-  }
+export async function getMonthlyAdvice(positions, budget = 50000, { allowLive = true } = {}) {
+  if (getKeyMode() === "demo" || !allowLive) return snapshotAdvice();
 
-  // Check Supabase cache
-  const cached = await getAdviceCache();
+  const store = await activeStore();
+  const cached = await store.getAdviceCache();
   if (cached && !cached.isStale) {
     return { ...cached.advice, _fromCache: true, _cacheAge: `${Math.round(cached.ageDays)}d ago` };
   }
 
-  // Fetch fresh
-  const fresh = await fetchMonthlyAdviceFromAPI(positions, budget);
+  const fresh = extractJson(await callClaude(buildAdvicePrompt(positions, budget), 16000));
   if (fresh) {
-    await saveAdviceCache(fresh);
+    await store.saveAdviceCache(fresh);
     return { ...fresh, _fromCache: false, _cacheAge: "just now" };
   }
 
-  // API failed — stale cache
   if (cached) {
     return { ...cached.advice, _fromCache: true, _cacheAge: `${Math.round(cached.ageDays)}d ago (stale)` };
   }
 
-  return null;
-}
-
-async function fetchMonthlyAdviceFromAPI(positions, budget) {
-  const portfolioContext = positions.map(pos => {
-    const stock = WATCHLIST_STOCKS[pos.ticker];
-    if (!stock) return null;
-    const gainPct = ((stock.price - pos.avgCost) / pos.avgCost * 100).toFixed(1);
-    return `${pos.ticker}: ${pos.shares} shares @ ₨${pos.avgCost} avg → ₨${stock.price} now (${gainPct}%), P/E ${stock.pe}, Score ${computeScore(stock)}/100, ${stock.sector}`;
-  }).filter(Boolean).join("\n");
-
-  const totalValue = positions.reduce((sum, pos) => {
-    const stock = WATCHLIST_STOCKS[pos.ticker];
-    return sum + (stock ? pos.shares * stock.price : 0);
-  }, 0);
-
-  try {
-    const response = await fetch("/api/claude", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1500,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        messages: [{
-          role: "user",
-          content: `You are a PSX portfolio advisor for a long-term investor in Pakistan. 
-
-PORTFOLIO (total value: ₨${totalValue.toLocaleString()}):
-${portfolioContext}
-
-BUDGET: ₨${budget.toLocaleString()} to invest this month.
-STYLE: Holds weeks to years. Not a day trader. Prefers value + growth. Shariah-compliant stocks preferred but not required.
-
-Search for current PSX market conditions, then advise:
-1. How to allocate the ₨${budget.toLocaleString()} this month
-2. Whether to rotate any existing positions
-3. Whether to hold cash and wait for better entries
-
-Respond ONLY in valid JSON with no markdown:
-{
-  "summary": "2-3 sentence overall advice for this month",
-  "marketCondition": "bullish|bearish|neutral|volatile",
-  "allocations": [
-    { "ticker": "OGDC", "amount": 15000, "reason": "1 sentence why" }
-  ],
-  "rotations": [
-    { "sell": "SNGP", "buy": "PPL", "reason": "1 sentence why" }
-  ],
-  "holdCash": { "amount": 0, "reason": "why hold cash or not" },
-  "keyRisk": "biggest risk to watch this month"
-}`
-        }],
-      }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const textBlocks = data.content?.filter(b => b.type === "text") || [];
-    const fullText = textBlocks.map(b => b.text).join("");
-    const jsonMatch = fullText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    return JSON.parse(jsonMatch[0]);
-  } catch (err) {
-    console.error("Monthly advice failed:", err);
-    return null;
-  }
+  return snapshotAdvice("Live advice is unavailable right now — showing the demo snapshot.");
 }
 
 // ============================================================
@@ -254,21 +198,20 @@ export function calculatePortfolioSummary(positions) {
 }
 
 // ============================================================
-// SAMPLE PORTFOLIO (Haad's actual Finqalab positions)
+// SAMPLE PORTFOLIO — fictional demo holdings (not real positions)
 // ============================================================
 
 export const SAMPLE_PORTFOLIO = [
-  { ticker: "ENGROH", shares: 10, avgCost: 263.39, targetSell: null, stopLoss: null, highSinceBuy: 268, notes: "Conglomerate play", buyDate: "2026-03-17" },
-  { ticker: "HBL", shares: 5, avgCost: 259.95, targetSell: null, stopLoss: null, highSinceBuy: 335, notes: "Dividend yield", buyDate: "2026-03-19" },
-  { ticker: "LUCK", shares: 15, avgCost: 349.36, targetSell: null, stopLoss: null, highSinceBuy: 490, notes: "Cement + CPEC", buyDate: "2026-03-17" },
-  { ticker: "MARI", shares: 3, avgCost: 598.99, targetSell: null, stopLoss: null, highSinceBuy: 605, notes: "Gas E&P value", buyDate: "2026-03-17" },
-  { ticker: "MEBL", shares: 5, avgCost: 440, targetSell: null, stopLoss: null, highSinceBuy: 488, notes: "Shariah core", buyDate: "2026-03-19" },
-  { ticker: "MZNPETF", shares: 500, avgCost: 18.22, targetSell: null, stopLoss: null, highSinceBuy: 18.50, notes: "Index exposure", buyDate: "2026-03-17" },
-  { ticker: "OGDC", shares: 25, avgCost: 263.54, targetSell: null, stopLoss: null, highSinceBuy: 268, notes: "E&P deep value", buyDate: "2026-03-17" },
-  { ticker: "PAEL", shares: 100, avgCost: 35.52, targetSell: null, stopLoss: null, highSinceBuy: 36, notes: "Consumer recovery", buyDate: "2026-03-17" },
-  { ticker: "PPL", shares: 4, avgCost: 214, targetSell: null, stopLoss: null, highSinceBuy: 262, notes: "Energy value", buyDate: "2026-03-19" },
-  { ticker: "PSO", shares: 13, avgCost: 357.27, targetSell: null, stopLoss: null, highSinceBuy: 467, notes: "Circular debt play", buyDate: "2026-03-17" },
-  { ticker: "SNGP", shares: 10, avgCost: 90.60, targetSell: null, stopLoss: null, highSinceBuy: 92, notes: "Gas utility", buyDate: "2026-03-17" },
-  { ticker: "SYS", shares: 4, avgCost: 127, targetSell: null, stopLoss: null, highSinceBuy: 520, notes: "USD hedge", buyDate: "2026-03-19" },
-  { ticker: "UBL", shares: 3, avgCost: 372.69, targetSell: null, stopLoss: null, highSinceBuy: 460, notes: "Deep value bank", buyDate: "2026-03-19" },
+  { ticker: "PSO", shares: 110, avgCost: 421.4, targetSell: null, stopLoss: null, highSinceBuy: 480, notes: "Circular debt play", buyDate: "2026-01-14" },
+  { ticker: "MCB", shares: 20, avgCost: 455, targetSell: null, stopLoss: 440, highSinceBuy: 470, notes: "Bank, stop set", buyDate: "2026-02-03" },
+  { ticker: "PPL", shares: 60, avgCost: 301.2, targetSell: null, stopLoss: null, highSinceBuy: 310, notes: "Energy value", buyDate: "2026-01-27" },
+  { ticker: "SYS", shares: 12, avgCost: 610, targetSell: null, stopLoss: null, highSinceBuy: 640, notes: "USD hedge", buyDate: "2026-02-10" },
+  { ticker: "OGDC", shares: 30, avgCost: 241.5, targetSell: null, stopLoss: null, highSinceBuy: 275, notes: "E&P value", buyDate: "2026-02-17" },
+  { ticker: "HBL", shares: 40, avgCost: 301.5, targetSell: null, stopLoss: null, highSinceBuy: 340, notes: "Dividend yield", buyDate: "2026-01-20" },
+  { ticker: "MEBL", shares: 25, avgCost: 421, targetSell: null, stopLoss: null, highSinceBuy: 495, notes: "Shariah core", buyDate: "2026-02-24" },
+  { ticker: "UBL", shares: 10, avgCost: 438.8, targetSell: null, stopLoss: null, highSinceBuy: 472, notes: "Bank value", buyDate: "2026-02-03" },
+  { ticker: "LUCK", shares: 20, avgCost: 452, targetSell: null, stopLoss: null, highSinceBuy: 505, notes: "Cement", buyDate: "2026-03-03" },
+  { ticker: "SNGP", shares: 80, avgCost: 101.3, targetSell: null, stopLoss: null, highSinceBuy: 104, notes: "Gas utility", buyDate: "2026-01-14" },
+  { ticker: "PAEL", shares: 150, avgCost: 33.8, targetSell: null, stopLoss: null, highSinceBuy: 37, notes: "Recovery bet", buyDate: "2026-03-03" },
+  { ticker: "MZNPETF", shares: 1000, avgCost: 17.4, targetSell: null, stopLoss: null, highSinceBuy: 18.6, notes: "Index exposure", buyDate: "2026-01-27" },
 ];
